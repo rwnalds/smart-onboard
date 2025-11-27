@@ -1,5 +1,0 @@
-{
-  "name": "SmartOnboard AI",
-  "description": "A dynamic, intelligent client onboarding form that adapts questions based on user responses using Gemini 2.5 Flash.",
-  "requestFramePermissions": []
-}
