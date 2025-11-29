@@ -141,9 +141,9 @@ const Sidebar = ({ meetingUrl, onClose }: SidebarProps) => {
         </div>
       </div>
 
-      {/* Current Question Prompt */}
+      {/* Current Question Prompt - Animated */}
       {currentPrompt && (
-        <QuestionPrompts prompt={currentPrompt} />
+        <QuestionPrompts key={currentPrompt.prompt || currentPrompt.id} prompt={currentPrompt} />
       )}
 
       {/* Tabs */}

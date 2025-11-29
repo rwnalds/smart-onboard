@@ -14,7 +14,7 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sessionId, completedItemIds, recentTranscript } = body;
+    const { sessionId, completedItemIds, recentTranscript, previousQuestions } = body;
 
     // For MVP, we'll use default agency config
     // In production, get from session -> userId -> agencyConfig
@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
       items as any[],
       completedItemIds || [],
       recentTranscript || [],
-      0 // callDuration
+      0, // callDuration
+      previousQuestions || []
     );
 
     return corsResponse({

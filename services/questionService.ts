@@ -33,7 +33,8 @@ export async function generateNextQuestion(
   checklist: ChecklistItem[],
   completedItemIds: number[],
   recentTranscript: TranscriptSegment[],
-  callDuration: number
+  callDuration: number,
+  previousQuestions?: string[]
 ): Promise<QuestionPrompt> {
   const pendingItems = checklist.filter((item) => !completedItemIds.includes(item.id));
   const requiredPending = pendingItems.filter((item) => item.required);
@@ -73,18 +74,25 @@ ${pendingItems
   .map((item) => `- ${item.label}${item.description ? ` (${item.description})` : ''}`)
   .join('\n')}`;
 
+  // Include previous questions to avoid repetition
+  const previousQuestionsText = previousQuestions && previousQuestions.length > 0
+    ? `\n\nIMPORTANT: Do NOT repeat these questions that were already asked:\n${previousQuestions.map((q, i) => `${i + 1}. "${q}"`).join('\n')}\n`
+    : '';
+
   const userPrompt = `Recent conversation:
-${transcriptText}
+${transcriptText}${previousQuestionsText}
+
+CRITICAL: Only suggest questions that address PENDING checklist items (those not yet completed).
 
 What should the agent ask next? Provide:
-1. The exact question to ask (natural, conversational)
-2. Which checklist item it addresses
-3. Brief reasoning (1 sentence)
+1. The exact question to ask (natural, conversational) - MUST be different from previously asked questions
+2. Which checklist item it addresses (must be one of the pending items)
+3. Brief reasoning (1 sentence explaining why this question helps fill a checklist gap)
 
 Format:
 QUESTION: [your question]
-ADDRESSES: [checklist item label]
-REASONING: [why this question now]`;
+ADDRESSES: [checklist item label from pending items]
+REASONING: [why this question now - must relate to filling checklist gaps]`;
 
   try {
     const completion = await openai.chat.completions.create({

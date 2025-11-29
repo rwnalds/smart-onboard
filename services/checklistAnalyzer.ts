@@ -61,7 +61,9 @@ Return JSON array of completed items in this exact format:
     "extracted_info": "<exact quote from client>",
     "confidence": <0.0-1.0>
   }
-]`;
+]
+
+CRITICAL: Always return an array [], even if there's only one item. Never return a single object.`;
 
   const userPrompt = `Checklist items to check:
 ${pendingItems.map((item, idx) => `ID ${item.id}: ${item.label}${item.description ? ` - ${item.description}` : ''}`).join('\n')}
@@ -85,13 +87,26 @@ Which items were answered? Return JSON array only.`;
     const response = completion.choices[0].message.content || '{}';
     const parsed = JSON.parse(response);
 
-    // Handle both array and object with 'completions' key
-    const completions: ChecklistCompletion[] = Array.isArray(parsed)
-      ? parsed
-      : parsed.completions || [];
+    console.log('[ChecklistAnalyzer] AI response:', parsed);
+
+    // Handle single object, array, or object with 'completions' key
+    let completions: ChecklistCompletion[] = [];
+    if (Array.isArray(parsed)) {
+      completions = parsed;
+    } else if (parsed.item_id !== undefined) {
+      // Single object returned instead of array
+      completions = [parsed];
+    } else if (parsed.completions) {
+      completions = parsed.completions;
+    }
+
+    console.log('[ChecklistAnalyzer] Parsed completions:', completions);
 
     // Filter by confidence threshold
-    return completions.filter((c) => c.confidence >= 0.8);
+    const filtered = completions.filter((c) => c.confidence >= 0.8);
+    console.log('[ChecklistAnalyzer] Filtered completions (>= 0.8 confidence):', filtered);
+    
+    return filtered;
   } catch (error) {
     console.error('Checklist analysis error:', error);
     return [];

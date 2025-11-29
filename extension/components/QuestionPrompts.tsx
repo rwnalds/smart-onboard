@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import type { QuestionPrompt } from "~types"
 
 interface QuestionPromptsProps {
@@ -8,6 +9,18 @@ interface QuestionPromptsProps {
 const QuestionPrompts = ({ prompt }: QuestionPromptsProps) => {
   const [copied, setCopied] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const prevPromptRef = useRef<string | null>(null)
+  const [isAnimating, setIsAnimating] = useState(false)
+
+  // Detect when prompt changes to trigger animation
+  useEffect(() => {
+    if (prevPromptRef.current && prevPromptRef.current !== prompt.prompt) {
+      setIsAnimating(true)
+      const timer = setTimeout(() => setIsAnimating(false), 500)
+      return () => clearTimeout(timer)
+    }
+    prevPromptRef.current = prompt.prompt
+  }, [prompt.prompt])
 
   const handleCopy = () => {
     navigator.clipboard.writeText(prompt.prompt)
@@ -20,13 +33,27 @@ const QuestionPrompts = ({ prompt }: QuestionPromptsProps) => {
   }
 
   return (
-    <div style={{
-      padding: '16px',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      borderBottom: '1px solid rgba(255,255,255,0.1)',
-      animation: 'slideIn 0.3s ease'
-    }}>
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={prompt.prompt}
+        initial={{ opacity: 0, y: -20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 20, scale: 0.95 }}
+        transition={{
+          type: "spring",
+          stiffness: 300,
+          damping: 30,
+          duration: 0.4
+        }}
+        style={{
+          padding: '16px',
+          background: isAnimating 
+            ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          borderBottom: '1px solid rgba(255,255,255,0.1)',
+        }}
+      >
       <div style={{
         display: 'flex',
         alignItems: 'start',
@@ -52,14 +79,20 @@ const QuestionPrompts = ({ prompt }: QuestionPromptsProps) => {
             Suggested Question
           </div>
 
-          <p style={{
-            margin: '0 0 12px 0',
-            fontSize: '15px',
-            lineHeight: '1.5',
-            fontWeight: 500
-          }}>
+          <motion.p
+            key={prompt.prompt}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            style={{
+              margin: '0 0 12px 0',
+              fontSize: '15px',
+              lineHeight: '1.5',
+              fontWeight: 500
+            }}
+          >
             "{prompt.prompt}"
-          </p>
+          </motion.p>
 
           <div style={{
             display: 'flex',
@@ -131,22 +164,8 @@ const QuestionPrompts = ({ prompt }: QuestionPromptsProps) => {
           </div>
         </div>
       </div>
-
-      <style>
-        {`
-          @keyframes slideIn {
-            from {
-              transform: translateY(-20px);
-              opacity: 0;
-            }
-            to {
-              transform: translateY(0);
-              opacity: 1;
-            }
-          }
-        `}
-      </style>
-    </div>
+      </motion.div>
+    </AnimatePresence>
   )
 }
 

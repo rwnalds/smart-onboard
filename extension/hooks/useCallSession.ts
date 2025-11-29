@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { CallSession, ChecklistItem, QuestionPrompt, TranscriptSegment } from "~types"
 import { useCaptionCapture } from "./useCaptionCapture"
 
@@ -9,6 +9,39 @@ export function useCallSession(meetingUrl: string) {
   const [currentPrompt, setCurrentPrompt] = useState<QuestionPrompt | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [isCaptureEnabled, setIsCaptureEnabled] = useState(false)
+  
+  // Track timing and state for smart question generation
+  const lastQuestionTimeRef = useRef<number>(0)
+  const lastAnswerCheckRef = useRef<number>(0)
+  const isGeneratingQuestionRef = useRef<boolean>(false)
+  const pauseCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lastClientUpdateTimeRef = useRef<number>(0)
+  const askedQuestionsRef = useRef<string[]>([]) // Track questions that were generated to avoid duplicates
+  const clientIsSpeakingRef = useRef<boolean>(false) // Track if client is actively speaking
+  const MIN_QUESTION_INTERVAL_MS = 5000 // Increased to 5 seconds between questions for stability
+  
+  // Use refs to access latest state in callbacks
+  const sessionRef = useRef<CallSession | null>(null)
+  const transcriptRef = useRef<TranscriptSegment[]>([])
+  const checklistRef = useRef<ChecklistItem[]>([])
+  const currentPromptRef = useRef<QuestionPrompt | null>(null)
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
+  
+  useEffect(() => {
+    transcriptRef.current = transcript
+  }, [transcript])
+  
+  useEffect(() => {
+    checklistRef.current = checklist
+  }, [checklist])
+  
+  useEffect(() => {
+    currentPromptRef.current = currentPrompt
+  }, [currentPrompt])
 
   // Caption capture (replaces audio recording)
   useCaptionCapture({
@@ -28,13 +61,30 @@ export function useCallSession(meetingUrl: string) {
           const lastSegment = prev[prev.length - 1];
 
           if (lastSegment && lastSegment.speaker === speaker) {
-            // Same speaker - update the existing segment's text
+            // Same speaker - update the existing segment's text (word-by-word updates)
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...lastSegment,
               text: caption.text, // Replace with latest caption text (word-by-word updates)
               timestamp: caption.timestamp
             };
+            
+            // Store updated transcript in ref immediately
+            transcriptRef.current = updated;
+            
+            // Track client updates for pause detection
+            if (speaker === 'client') {
+              lastClientUpdateTimeRef.current = Date.now();
+              clientIsSpeakingRef.current = true; // Mark that client is actively speaking
+              // Clear any pending pause checks - client is still speaking
+              if (pauseCheckIntervalRef.current) {
+                clearTimeout(pauseCheckIntervalRef.current);
+                pauseCheckIntervalRef.current = null;
+              }
+              // Reschedule pause check (client is still speaking - keep extending the timeout)
+              scheduleAnswerQualityCheck();
+            }
+            
             return updated;
           } else {
             // Different speaker - create new segment
@@ -48,14 +98,40 @@ export function useCallSession(meetingUrl: string) {
 
             const updated = [...prev, newSegment];
 
-            // Analyze for checklist completion every 3 complete speaker segments
-            if (updated.length % 3 === 0) {
-              analyzeChecklist();
+            // Store updated transcript in ref immediately for use in callbacks
+            transcriptRef.current = updated;
+
+            // Analyze for checklist completion when new segments arrive
+            // Trigger on every client segment to ensure we catch answers quickly
+            if (speaker === 'client') {
+              // Use setTimeout to defer execution, ensuring refs are updated
+              setTimeout(() => analyzeChecklist(), 0);
             }
 
-            // Generate next question every 5 complete speaker segments
-            if (updated.length % 5 === 0) {
-              generateQuestion();
+            // Handle question generation triggers based on speaker
+            if (speaker === 'client') {
+              // Client just started speaking (new segment)
+              lastClientUpdateTimeRef.current = Date.now();
+              clientIsSpeakingRef.current = true; // Mark that client is actively speaking
+              // Clear any pending generation - client is speaking now
+              if (pauseCheckIntervalRef.current) {
+                clearTimeout(pauseCheckIntervalRef.current);
+                pauseCheckIntervalRef.current = null;
+              }
+              // Schedule check after they finish (longer delay to ensure they're done)
+              setTimeout(() => scheduleAnswerQualityCheck(), 0);
+            } else if (speaker === 'agent') {
+              // Agent started speaking - client must have finished
+              clientIsSpeakingRef.current = false; // Client stopped speaking
+              // Clear any pending pause check
+              if (pauseCheckIntervalRef.current) {
+                clearTimeout(pauseCheckIntervalRef.current);
+                pauseCheckIntervalRef.current = null;
+              }
+              // Wait longer before checking - agent might be asking follow-up
+              setTimeout(() => {
+                checkAnswerQualityAndGenerateQuestion();
+              }, 1500);
             }
 
             console.log('[Session] New speaker:', { speaker, actualName: caption.speaker });
@@ -102,22 +178,200 @@ export function useCallSession(meetingUrl: string) {
     };
   }, [])
 
-  // Analyze checklist for auto-completion
-  const analyzeChecklist = async () => {
-    if (!session || transcript.length < 2) return;
+  // Schedule answer quality check after a pause
+  const scheduleAnswerQualityCheck = () => {
+    // Don't schedule if client is actively speaking - REMOVED to fix bug
+    // We WANT to schedule it so it runs after they stop speaking
+    // if (clientIsSpeakingRef.current) {
+    //   return;
+    // }
+
+    // Clear any existing timeout
+    if (pauseCheckIntervalRef.current) {
+      clearTimeout(pauseCheckIntervalRef.current);
+    }
+
+    // Wait 4 seconds after last client update, then check if they finished answering
+    // This gives time for the client to finish speaking (word-by-word captions may keep updating)
+    pauseCheckIntervalRef.current = setTimeout(() => {
+      // Double-check that client is not actively speaking
+      const timeSinceLastUpdate = Date.now() - lastClientUpdateTimeRef.current;
+      
+      if (clientIsSpeakingRef.current || timeSinceLastUpdate < 3500) {
+        // Client is still speaking or paused too recently, reschedule
+        console.log('[Session] Client still speaking or pause too short, rescheduling check...');
+        if (!clientIsSpeakingRef.current) {
+          scheduleAnswerQualityCheck();
+        }
+        return;
+      }
+
+      // Mark that client stopped speaking
+      clientIsSpeakingRef.current = false;
+      console.log('[Session] Pause detected after client response, checking answer quality...');
+      checkAnswerQualityAndGenerateQuestion();
+    }, 4000);
+  };
+
+  // Check answer quality and generate question if appropriate
+  const checkAnswerQualityAndGenerateQuestion = async () => {
+    const currentSession = sessionRef.current;
+    const currentTranscript = transcriptRef.current;
+    
+    if (!currentSession || currentTranscript.length < 2) return;
+    
+    // CRITICAL: Don't generate if client is actively speaking
+    if (clientIsSpeakingRef.current) {
+      console.log('[Session] ⏸️ Skipping - client is actively speaking');
+      return;
+    }
+    
+    if (isGeneratingQuestionRef.current) {
+      console.log('[Session] ⏸️ Skipping - question generation already in progress');
+      return;
+    }
+
+    const now = Date.now();
+    
+    // Don't generate questions too frequently
+    if (now - lastQuestionTimeRef.current < MIN_QUESTION_INTERVAL_MS) {
+      console.log('[Session] ⏸️ Skipping question generation - too soon since last question');
+      return;
+    }
+
+    // Don't check answer quality too frequently (min 2 seconds between checks)
+    if (now - lastAnswerCheckRef.current < 2000) {
+      return;
+    }
+
+    lastAnswerCheckRef.current = now;
 
     try {
-      const pendingItems = checklist.filter(item => !item.completed);
-      if (pendingItems.length === 0) return;
+      const recentTranscript = currentTranscript.slice(-10);
+      const currentQuestion = currentPromptRef.current?.prompt || null;
+      
+      // Check if client has paused (client-side check based on last update time)
+      const timeSinceLastClientUpdate = Date.now() - lastClientUpdateTimeRef.current;
+      
+      // Check if agent has started speaking (fallback for pause detection)
+      const isAgentSpeaking = currentTranscript.length > 0 && currentTranscript[currentTranscript.length - 1].speaker === 'agent';
+      
+      const hasPause = timeSinceLastClientUpdate >= 2500 || isAgentSpeaking;
+      
+      // Also check if last segment is from client
+      const lastSegment = currentTranscript[currentTranscript.length - 1];
+      const isLastSpeakerClient = lastSegment?.speaker === 'client';
+
+      console.log('[Session] Checking answer quality...', {
+        timeSinceLastClientUpdate,
+        hasPause,
+        isLastSpeakerClient,
+        lastSpeaker: lastSegment?.speaker,
+        transcriptLength: currentTranscript.length
+      });
+
+      // Check answer quality
+      const requestBody = {
+          currentQuestion,
+          recentTranscript,
+          pauseThresholdMs: 2000,
+          // Also pass client-side pause detection
+          hasClientPause: hasPause
+      };
+
+      console.log('[Session] Sending answer analysis request:', {
+        hasClientPause: requestBody.hasClientPause,
+        hasPauseVar: hasPause,
+        transcriptLength: recentTranscript.length,
+        lastSpeaker: recentTranscript[recentTranscript.length - 1]?.speaker
+      });
+
+      const response = await fetch(`${process.env.PLASMO_PUBLIC_API_URL || 'http://localhost:3000'}/api/answers/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+        if (response.ok) {
+        const { quality, hasPause, shouldGenerateQuestion, hasServerPause } = await response.json();
+        
+        const recentTranscript = currentTranscript.slice(-5);
+        const lastClientSegments = recentTranscript.filter(seg => seg.speaker === 'client').slice(-2);
+        
+        console.log('[Session] Answer quality check:', {
+          hasAnswered: quality.hasAnswered,
+          isSubstantial: quality.isSubstantial,
+          hasPause,
+          shouldGenerateQuestion,
+          confidence: quality.confidence,
+          reasoning: quality.reasoning,
+          currentQuestion: currentQuestion?.substring(0, 80),
+          lastClientResponse: lastClientSegments.map(seg => seg.text).join(' ').substring(0, 150),
+          transcriptLength: currentTranscript.length
+        });
+
+        if (shouldGenerateQuestion) {
+          console.log('[Session] ✅ Client finished answering - generating next question');
+          console.log('[Session] Current question that was answered:', currentQuestion?.substring(0, 80));
+          
+          // Generate new question
+          await generateQuestion();
+          
+          // After generating new question, give it a moment then verify it was set
+          setTimeout(() => {
+            const newQuestion = currentPromptRef.current?.prompt;
+            if (newQuestion) {
+              console.log('[Session] ✅ New question set and ready for tracking:', newQuestion.substring(0, 80));
+            } else {
+              console.warn('[Session] ⚠️ New question was not set properly');
+            }
+          }, 500);
+        } else {
+          // Log why we're not generating
+          if (!hasPause) {
+            console.log('[Session] ⏸️ No pause detected yet - waiting for client to finish speaking');
+          } else if (!quality.hasAnswered) {
+            console.log('[Session] ❌ Client paused but answer not recognized as adequate:', quality.reasoning);
+          } else if (!quality.isSubstantial) {
+            console.log('[Session] ⚠️ Client answered but response is not substantial enough:', quality.reasoning);
+          } else {
+            console.log('[Session] ⚠️ All conditions met but not generating (this shouldn\'t happen)');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Session] Answer quality check error:', error);
+    }
+  };
+
+  // Analyze checklist for auto-completion
+  const analyzeChecklist = async () => {
+    const currentSession = sessionRef.current;
+    const currentTranscript = transcriptRef.current;
+    const currentChecklist = checklistRef.current;
+    
+    if (!currentSession || currentTranscript.length < 2) return;
+
+    try {
+      const pendingItems = currentChecklist.filter(item => !item.completed);
+      if (pendingItems.length === 0) {
+        console.log('[Checklist] All items completed');
+        return;
+      }
+
+      console.log('[Checklist] Analyzing transcript for completions...', {
+        pendingCount: pendingItems.length,
+        transcriptLength: currentTranscript.length
+      });
 
       // Get recent transcript (last 10 segments)
-      const recentTranscript = transcript.slice(-10);
+      const recentTranscript = currentTranscript.slice(-10);
 
       const response = await fetch(`${process.env.PLASMO_PUBLIC_API_URL || 'http://localhost:3000'}/api/checklist/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId: session.id,
+          sessionId: currentSession.id,
           recentTranscript,
           pendingItems
         })
@@ -126,15 +380,26 @@ export function useCallSession(meetingUrl: string) {
       if (response.ok) {
         const { completedItems } = await response.json();
 
+        console.log('[Checklist] Analysis complete:', {
+          foundCompletions: completedItems.length,
+          completions: completedItems
+        });
+
         // Update checklist
         setChecklist(prev =>
           prev.map(item => {
-            const completion = completedItems.find((c: any) => c.itemId === item.id);
+            // Handle both item_id (from AI) and itemId (camelCase)
+            const completion = completedItems.find((c: any) => (c.itemId || c.item_id) === item.id);
             if (completion) {
+              console.log('[Checklist] ✅ Marking item as completed:', {
+                itemId: item.id,
+                label: item.label,
+                extractedInfo: completion.extractedInfo || completion.extracted_info
+              });
               return {
                 ...item,
                 completed: true,
-                extractedInfo: completion.extractedInfo,
+                extractedInfo: completion.extractedInfo || completion.extracted_info,
                 completedAt: new Date()
               };
             }
@@ -149,28 +414,87 @@ export function useCallSession(meetingUrl: string) {
 
   // Generate next question suggestion
   const generateQuestion = async () => {
-    if (!session) return;
+    const currentSession = sessionRef.current;
+    const currentChecklist = checklistRef.current;
+    const currentTranscript = transcriptRef.current;
+    
+    if (!currentSession) return;
+    if (isGeneratingQuestionRef.current) {
+      console.log('[Session] Question generation already in progress');
+      return;
+    }
+
+    const now = Date.now();
+    
+    // Don't generate questions too frequently
+    if (now - lastQuestionTimeRef.current < MIN_QUESTION_INTERVAL_MS) {
+      console.log('[Session] Skipping question generation - too soon since last question');
+      return;
+    }
+
+    isGeneratingQuestionRef.current = true;
+    lastQuestionTimeRef.current = now;
 
     try {
-      const completedIds = checklist.filter(item => item.completed).map(item => item.id);
-      const recentTranscript = transcript.slice(-10);
+      const completedIds = currentChecklist.filter(item => item.completed).map(item => item.id);
+      const pendingItems = currentChecklist.filter(item => !item.completed);
+      const recentTranscript = currentTranscript.slice(-10);
+
+      // Only generate question if there are pending checklist items
+      if (pendingItems.length === 0) {
+        console.log('[Session] ⏸️ Skipping question generation - all checklist items completed');
+        isGeneratingQuestionRef.current = false;
+        return;
+      }
+
+      console.log('[Session] Generating next question based on checklist gaps...', {
+        completedItems: completedIds.length,
+        pendingItems: pendingItems.length,
+        recentSegments: recentTranscript.length
+      });
+
+      // Get previously asked questions - combine from both transcript and our tracked list
+      const transcriptQuestions = currentTranscript
+        .filter(seg => seg.speaker === 'agent')
+        .map(seg => seg.text.trim())
+        .filter(text => text.length > 0 && (text.endsWith('?') || text.includes('?')))
+        .slice(-5);
+      
+      // Combine with our tracked list of generated questions
+      const previousQuestions = [...new Set([...askedQuestionsRef.current, ...transcriptQuestions])].slice(-10);
 
       const response = await fetch(`${process.env.PLASMO_PUBLIC_API_URL || 'http://localhost:3000'}/api/questions/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId: session.id,
+          sessionId: currentSession.id,
           completedItemIds: completedIds,
-          recentTranscript
+          recentTranscript,
+          previousQuestions: previousQuestions // Pass to avoid repetition
         })
       });
 
       if (response.ok) {
         const prompt = await response.json();
+        const questionText = prompt.prompt;
+        
         setCurrentPrompt(prompt);
+        
+        // Track this question to avoid generating it again
+        if (questionText) {
+          askedQuestionsRef.current = [...askedQuestionsRef.current, questionText].slice(-10);
+          console.log('[Session] ✅ New question generated:', questionText.substring(0, 80) + '...');
+          console.log('[Session] Tracked questions count:', askedQuestionsRef.current.length);
+        }
+        
+        // Reset last question time to allow immediate question generation after this one is answered
+        // This ensures we can generate the next question promptly after client answers
+        console.log('[Session] Ready to check answers for this new question');
       }
     } catch (error) {
       console.error('Question generation error:', error);
+    } finally {
+      isGeneratingQuestionRef.current = false;
     }
   };
 
@@ -219,6 +543,14 @@ export function useCallSession(meetingUrl: string) {
       // Start caption capture
       setIsCaptureEnabled(true)
       console.log('Caption capture enabled');
+
+      // Generate initial question if checklist has items
+      if (checklistData.length > 0) {
+        // Wait a moment for transcript to start, then generate first question
+        setTimeout(() => {
+          generateQuestion();
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to start session:', error)
       alert('Failed to start call session. Please check the console for errors.');
@@ -232,6 +564,12 @@ export function useCallSession(meetingUrl: string) {
     try {
       // Stop caption capture
       setIsCaptureEnabled(false)
+
+      // Clear any pending pause checks
+      if (pauseCheckIntervalRef.current) {
+        clearTimeout(pauseCheckIntervalRef.current);
+        pauseCheckIntervalRef.current = null;
+      }
 
       // Update session status
       await fetch(`${process.env.PLASMO_PUBLIC_API_URL || 'http://localhost:3000'}/api/sessions/${session.id}`, {
@@ -250,6 +588,18 @@ export function useCallSession(meetingUrl: string) {
       console.error('Failed to stop session:', error)
     }
   }
+
+  // Removed periodic check - it was causing chaotic question generation
+  // Question generation now only happens through structured state machine
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pauseCheckIntervalRef.current) {
+        clearTimeout(pauseCheckIntervalRef.current);
+      }
+    };
+  }, [])
 
   const toggleCapture = () => {
     setIsCaptureEnabled(prev => !prev)
