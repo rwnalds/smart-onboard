@@ -1,6 +1,6 @@
 import { db } from '@/db';
 import { transcriptSegments } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, asc, desc } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
@@ -57,18 +57,20 @@ export async function GET(request: NextRequest) {
     }
 
     let segments;
-    
+
     if (sessionId) {
-      segments = await db.query.transcriptSegments.findMany({
-        where: eq(transcriptSegments.callSessionId, sessionId),
-        orderBy: (segments, { asc }) => [asc(segments.timestamp)],
-      });
+      segments = await db
+        .select()
+        .from(transcriptSegments)
+        .where(eq(transcriptSegments.callSessionId, sessionId))
+        .orderBy(asc(transcriptSegments.timestamp));
     } else if (clientId) {
-      segments = await db.query.transcriptSegments.findMany({
-        where: eq(transcriptSegments.clientId, clientId),
-        orderBy: (segments, { desc }) => [desc(segments.timestamp)],
-        limit: 100, // Last 100 segments
-      });
+      segments = await db
+        .select()
+        .from(transcriptSegments)
+        .where(eq(transcriptSegments.clientId, clientId))
+        .orderBy(desc(transcriptSegments.timestamp))
+        .limit(100);
     }
 
     return corsResponse({ segments });

@@ -18,9 +18,11 @@ export async function GET(request: NextRequest) {
       return corsResponse({ error: 'userId required' }, 400);
     }
 
-    const settings = await db.query.organizationSettings.findFirst({
-      where: eq(organizationSettings.userId, userId),
-    });
+    const [settings] = await db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.userId, userId))
+      .limit(1);
 
     if (!settings) {
       // Return default settings structure
@@ -64,9 +66,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if settings exist
-    const existing = await db.query.organizationSettings.findFirst({
-      where: eq(organizationSettings.userId, userId),
-    });
+    const [existing] = await db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.userId, userId))
+      .limit(1);
 
     let result;
 

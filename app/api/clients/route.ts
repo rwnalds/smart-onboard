@@ -1,6 +1,6 @@
 import { db } from '@/db';
-import { clients } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { clients, callSessions } from '@/db/schema';
+import { desc, eq, count } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
@@ -18,29 +18,24 @@ export async function GET(request: NextRequest) {
       return corsResponse({ error: 'userId required' }, 400);
     }
 
-    const userClients = await db.query.clients.findMany({
-      where: eq(clients.userId, userId),
-      orderBy: [desc(clients.lastContactedAt)],
-      with: {
-        callSessions: {
-          limit: 1,
-          orderBy: (sessions, { desc }) => [desc(sessions.startedAt)],
-        },
-      },
-    });
+    // Get all clients for user
+    const userClients = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.userId, userId))
+      .orderBy(desc(clients.lastContactedAt));
 
-    // Add session count for each client
+    // Get session counts for each client
     const clientsWithStats = await Promise.all(
       userClients.map(async (client) => {
-        const { callSessions } = await import('@/db/schema');
-        const sessionCount = await db
-          .select({ count: db.$count() })
+        const [sessionCountResult] = await db
+          .select({ count: count() })
           .from(callSessions)
           .where(eq(callSessions.clientId, client.id));
 
         return {
           ...client,
-          sessionCount: sessionCount[0]?.count || 0,
+          sessionCount: sessionCountResult?.count || 0,
         };
       })
     );
@@ -81,9 +76,11 @@ export async function POST(request: NextRequest) {
         .where(eq(clients.id, result.clientId));
     }
 
-    const client = await db.query.clients.findFirst({
-      where: eq(clients.id, result.clientId),
-    });
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, result.clientId))
+      .limit(1);
 
     return corsResponse({ client, isNew: result.isNewClient }, result.isNewClient ? 201 : 200);
   } catch (error) {

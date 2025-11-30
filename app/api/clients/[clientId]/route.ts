@@ -1,6 +1,6 @@
 import { db } from '@/db';
-import { clients } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { clients, callSessions, clientInsights } from '@/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
@@ -16,24 +16,39 @@ export async function GET(
   try {
     const { clientId } = await params;
 
-    const client = await db.query.clients.findFirst({
-      where: eq(clients.id, clientId),
-      with: {
-        callSessions: {
-          orderBy: (sessions, { desc }) => [desc(sessions.startedAt)],
-          limit: 10,
-        },
-        insights: {
-          orderBy: (insights, { desc }) => [desc(insights.updatedAt)],
-        },
-      },
-    });
+    // Get client
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .limit(1);
 
     if (!client) {
       return corsResponse({ error: 'Client not found' }, 404);
     }
 
-    return corsResponse({ client });
+    // Get recent call sessions
+    const sessions = await db
+      .select()
+      .from(callSessions)
+      .where(eq(callSessions.clientId, clientId))
+      .orderBy(desc(callSessions.startedAt))
+      .limit(10);
+
+    // Get insights
+    const insights = await db
+      .select()
+      .from(clientInsights)
+      .where(eq(clientInsights.clientId, clientId))
+      .orderBy(desc(clientInsights.updatedAt));
+
+    return corsResponse({
+      client: {
+        ...client,
+        callSessions: sessions,
+        insights: insights,
+      },
+    });
   } catch (error) {
     console.error('Failed to fetch client:', error);
     return corsResponse({ error: 'Internal server error' }, 500);

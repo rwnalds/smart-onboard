@@ -42,25 +42,28 @@ export async function retrieveClientContext(
   const { maxTranscripts = 50, maxInsights = 20 } = options;
 
   // Get recent transcripts
-  const transcripts = await db.query.transcriptSegments.findMany({
-    where: eq(transcriptSegments.clientId, clientId),
-    orderBy: [desc(transcriptSegments.timestamp)],
-    limit: maxTranscripts,
-  });
+  const transcripts = await db
+    .select()
+    .from(transcriptSegments)
+    .where(eq(transcriptSegments.clientId, clientId))
+    .orderBy(desc(transcriptSegments.timestamp))
+    .limit(maxTranscripts);
 
   // Get client insights
-  const insights = await db.query.clientInsights.findMany({
-    where: eq(clientInsights.clientId, clientId),
-    orderBy: [desc(clientInsights.updatedAt)],
-    limit: maxInsights,
-  });
+  const insights = await db
+    .select()
+    .from(clientInsights)
+    .where(eq(clientInsights.clientId, clientId))
+    .orderBy(desc(clientInsights.updatedAt))
+    .limit(maxInsights);
 
   // Get session summaries
-  const sessions = await db.query.callSessions.findMany({
-    where: eq(callSessions.clientId, clientId),
-    orderBy: [desc(callSessions.startedAt)],
-    limit: 10,
-  });
+  const sessions = await db
+    .select()
+    .from(callSessions)
+    .where(eq(callSessions.clientId, clientId))
+    .orderBy(desc(callSessions.startedAt))
+    .limit(10);
 
   return {
     transcripts: transcripts.map(t => ({
@@ -206,12 +209,13 @@ export async function extractClientInsights(
   sessionId: string
 ): Promise<void> {
   // Get all transcripts for this session
-  const sessionTranscripts = await db.query.transcriptSegments.findMany({
-    where: and(
+  const sessionTranscripts = await db
+    .select()
+    .from(transcriptSegments)
+    .where(and(
       eq(transcriptSegments.callSessionId, sessionId),
       eq(transcriptSegments.speaker, 'client')
-    ),
-  });
+    ));
 
   if (sessionTranscripts.length === 0) {
     return;

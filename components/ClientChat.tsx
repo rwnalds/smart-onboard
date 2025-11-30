@@ -199,19 +199,14 @@ export default function ClientChat({ clientId, userId, clientName }: ClientChatP
                     {message.role === 'assistant' && message.context && (
                       <div className="mt-2 pt-2 border-t border-border/50">
                         <div className="flex gap-2 text-xs text-muted-foreground">
-                          {message.context.transcriptCount !== undefined && (
+                          {message.context?.transcriptIds && message.context.transcriptIds.length > 0 && (
                             <Badge variant="outline" className="text-xs">
-                              {message.context.transcriptCount} transcripts
+                              {message.context.transcriptIds.length} transcripts
                             </Badge>
                           )}
-                          {message.context.insightCount !== undefined && (
+                          {message.context?.sessionIds && message.context.sessionIds.length > 0 && (
                             <Badge variant="outline" className="text-xs">
-                              {message.context.insightCount} insights
-                            </Badge>
-                          )}
-                          {message.context.sessionCount !== undefined && (
-                            <Badge variant="outline" className="text-xs">
-                              {message.context.sessionCount} sessions
+                              {message.context.sessionIds.length} sessions
                             </Badge>
                           )}
                         </div>

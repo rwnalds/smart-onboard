@@ -36,9 +36,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Get organization settings for this user
-    const settings = await db.query.organizationSettings.findFirst({
-      where: eq(organizationSettings.userId, finalUserId),
-    });
+    const [settings] = await db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.userId, finalUserId))
+      .limit(1);
 
     // Get checklist items for this user
     const items = await db

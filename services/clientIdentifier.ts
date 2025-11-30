@@ -78,12 +78,14 @@ export async function identifyOrCreateClient(
   const normalizedName = normalizeName(name);
   
   // First, try exact match on normalized name
-  const exactMatch = await db.query.clients.findFirst({
-    where: and(
+  const [exactMatch] = await db
+    .select()
+    .from(clients)
+    .where(and(
       eq(clients.userId, userId),
       eq(clients.normalizedName, normalizedName)
-    ),
-  });
+    ))
+    .limit(1);
   
   if (exactMatch) {
     return {
@@ -96,12 +98,14 @@ export async function identifyOrCreateClient(
   
   // If email provided, try matching by email
   if (email) {
-    const emailMatch = await db.query.clients.findFirst({
-      where: and(
+    const [emailMatch] = await db
+      .select()
+      .from(clients)
+      .where(and(
         eq(clients.userId, userId),
         eq(clients.email, email)
-      ),
-    });
+      ))
+      .limit(1);
     
     if (emailMatch) {
       // Update the name if it's different
@@ -125,9 +129,10 @@ export async function identifyOrCreateClient(
   }
   
   // Try fuzzy matching on all clients for this user
-  const userClients = await db.query.clients.findMany({
-    where: eq(clients.userId, userId),
-  });
+  const userClients = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.userId, userId));
   
   let bestMatch: typeof userClients[0] | null = null;
   let bestSimilarity = 0;

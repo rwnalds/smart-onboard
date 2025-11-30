@@ -18,27 +18,32 @@ function SyncUserToExtensionInner() {
         try {
           const savedExtensionId = localStorage.getItem('smartonboard_extension_id');
 
-          if (savedExtensionId && typeof chrome !== 'undefined' && chrome.runtime) {
+          if (savedExtensionId && typeof window !== 'undefined' && (window as any).chrome?.runtime) {
+            const chrome = (window as any).chrome;
             console.log('[SyncUser] Sending to extension:', savedExtensionId);
-            chrome.runtime.sendMessage(
-              savedExtensionId,
-              {
-                type: 'SYNC_USER',
-                data: {
-                  userId: user.id,
-                  userEmail: user.primaryEmail,
-                  userName: user.displayName || user.primaryEmail
+            try {
+              chrome.runtime.sendMessage(
+                savedExtensionId,
+                {
+                  type: 'SYNC_USER',
+                  data: {
+                    userId: user.id,
+                    userEmail: user.primaryEmail,
+                    userName: user.displayName || user.primaryEmail
+                  }
+                },
+                (response: any) => {
+                  if (chrome.runtime.lastError) {
+                    console.error('[SyncUser] ❌ Error:', chrome.runtime.lastError.message);
+                    console.log('[SyncUser] 💡 Make sure extension is loaded');
+                  } else {
+                    console.log('[SyncUser] ✅ User synced to extension!', response);
+                  }
                 }
-              },
-              (response) => {
-                if (chrome.runtime.lastError) {
-                  console.error('[SyncUser] ❌ Error:', chrome.runtime.lastError.message);
-                  console.log('[SyncUser] 💡 Make sure extension is loaded');
-                } else {
-                  console.log('[SyncUser] ✅ User synced to extension!', response);
-                }
-              }
-            );
+              );
+            } catch (error) {
+              console.error('[SyncUser] Failed to send message to extension:', error);
+            }
           } else {
             // Show instructions for first-time setup
             console.log('[SyncUser] ⚠️ Extension ID not set');
