@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { callSessions, transcriptSegments } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { corsResponse, handleCorsPreFlight } from '../../cors';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -12,13 +12,14 @@ export async function OPTIONS() {
 // GET /api/sessions/:id
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const [session] = await db
       .select()
       .from(callSessions)
-      .where(eq(callSessions.id, params.id));
+      .where(eq(callSessions.id, id));
 
     if (!session) {
       return corsResponse({ error: 'Session not found' }, 404);
@@ -28,7 +29,7 @@ export async function GET(
     const segments = await db
       .select()
       .from(transcriptSegments)
-      .where(eq(transcriptSegments.callSessionId, params.id))
+      .where(eq(transcriptSegments.callSessionId, id))
       .orderBy(transcriptSegments.timestamp);
 
     return corsResponse({
@@ -44,9 +45,10 @@ export async function GET(
 // PATCH /api/sessions/:id
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const { status, endedAt, duration, summary, clientName, clientEmail } = body;
 
@@ -62,7 +64,7 @@ export async function PATCH(
     const [updatedSession] = await db
       .update(callSessions)
       .set(updateData)
-      .where(eq(callSessions.id, params.id))
+      .where(eq(callSessions.id, id))
       .returning();
 
     if (!updatedSession) {

@@ -1,6 +1,6 @@
 import { analyzeAnswerQuality, detectClientPause } from '@/services/answerQualityAnalyzer';
 import { NextRequest } from 'next/server';
-import { corsResponse, handleCorsPreFlight } from '../../cors';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {

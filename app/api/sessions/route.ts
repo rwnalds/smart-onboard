@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { callSessions } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
-import { corsResponse, handleCorsPreFlight } from '../cors';
+import { NextRequest } from 'next/server';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -37,13 +37,28 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, meetingUrl, agencyConfigId } = body;
+    const { userId, meetingUrl, clientName } = body;
 
     if (!userId) {
       return corsResponse({ error: 'userId required' }, 400);
     }
 
     const sessionId = nanoid();
+    
+    // Auto-identify or create client if clientName provided
+    let clientId: string | null = null;
+    if (clientName) {
+      const { identifyOrCreateClient } = await import('@/services/clientIdentifier');
+      const result = await identifyOrCreateClient(clientName, userId);
+      clientId = result.clientId;
+      
+      console.log('[Sessions] Client identified:', {
+        clientName,
+        clientId,
+        isNew: result.isNewClient,
+        confidence: result.confidence,
+      });
+    }
 
     const [newSession] = await db
       .insert(callSessions)
@@ -51,7 +66,8 @@ export async function POST(request: NextRequest) {
         id: sessionId,
         userId,
         meetingUrl,
-        agencyConfigId,
+        clientId,
+        clientName,
         status: 'active',
       })
       .returning();

@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { transcriptSegments } from '@/db/schema';
 import { transcribeAudio, identifySpeaker } from '@/services/whisperService';
 import { eq } from 'drizzle-orm';
-import { corsResponse, handleCorsPreFlight } from '../cors';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {

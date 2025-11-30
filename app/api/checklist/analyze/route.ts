@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeTranscriptForCompletions } from '@/services/checklistAnalyzer';
-import { corsResponse, handleCorsPreFlight } from '../../cors';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {

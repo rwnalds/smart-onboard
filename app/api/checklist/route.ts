@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { checklistItems, agencyConfigs } from '@/db/schema';
+import { checklistItems, organizationSettings } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { corsResponse, handleCorsPreFlight } from '../cors';
+import { corsResponse, handleCorsPreFlight } from '@/app/api/cors';
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -14,43 +14,21 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
-    const agencyConfigId = searchParams.get('agencyConfigId');
 
-    if (!userId && !agencyConfigId) {
-      return corsResponse({ error: 'userId or agencyConfigId required' }, 400);
+    if (!userId) {
+      return corsResponse({ error: 'userId required' }, 400);
     }
 
-    let configId = agencyConfigId ? parseInt(agencyConfigId) : null;
-
-    // If userId provided, get their agency config
-    if (!configId && userId) {
-      const [config] = await db
-        .select()
-        .from(agencyConfigs)
-        .where(eq(agencyConfigs.userId, userId));
-
-      if (!config) {
-        // No config found, create default checklist
-        return corsResponse(getDefaultChecklist());
-      }
-
-      configId = config.id;
-    }
-
-    if (!configId) {
-      return corsResponse(getDefaultChecklist());
-    }
-
-    // Get checklist items for this agency config
+    // Get checklist items for this user
     const items = await db
       .select()
       .from(checklistItems)
-      .where(eq(checklistItems.agencyConfigId, configId))
+      .where(eq(checklistItems.userId, userId))
       .orderBy(checklistItems.order);
 
     // If no items exist, create default ones
     if (items.length === 0) {
-      const defaultItems = await createDefaultChecklistForAgency(configId);
+      const defaultItems = await createDefaultChecklistForUser(userId);
       return corsResponse(defaultItems);
     }
 
@@ -65,10 +43,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { agencyConfigId, items: newItems } = body;
+    const { userId, items: newItems } = body;
 
-    if (!agencyConfigId || !newItems) {
-      return corsResponse({ error: 'agencyConfigId and items required' }, 400);
+    if (!userId || !newItems) {
+      return corsResponse({ error: 'userId and items required' }, 400);
     }
 
     // Insert new checklist items
@@ -76,7 +54,7 @@ export async function POST(request: NextRequest) {
       .insert(checklistItems)
       .values(
         newItems.map((item: any, index: number) => ({
-          agencyConfigId,
+          userId,
           label: item.label,
           description: item.description,
           category: item.category,
@@ -147,14 +125,38 @@ function getDefaultChecklist() {
   ];
 }
 
-async function createDefaultChecklistForAgency(agencyConfigId: number) {
-  const defaultItems = getDefaultChecklist();
+async function createDefaultChecklistForUser(userId: string) {
+  // Try to get organization settings to customize checklist
+  const [settings] = await db
+    .select()
+    .from(organizationSettings)
+    .where(eq(organizationSettings.userId, userId))
+    .limit(1);
+
+  let defaultItems = getDefaultChecklist();
+
+  // If organization settings exist and have onboarding goals, customize the checklist
+  if (settings?.onboardingGoal) {
+    // Parse the onboarding goals to create custom checklist items
+    const goals = settings.onboardingGoal.split(',').map(g => g.trim()).filter(Boolean);
+
+    if (goals.length > 0) {
+      defaultItems = goals.map((goal, index) => ({
+        id: index + 1,
+        label: goal,
+        description: `Gather information about: ${goal}`,
+        category: 'business_basics',
+        order: index + 1,
+        required: true,
+      }));
+    }
+  }
 
   const created = await db
     .insert(checklistItems)
     .values(
       defaultItems.map((item) => ({
-        agencyConfigId,
+        userId,
         label: item.label,
         description: item.description,
         category: item.category,

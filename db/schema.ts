@@ -1,5 +1,5 @@
-import { pgTable, text, serial, integer, timestamp, jsonb, index, uniqueIndex, boolean, real } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import { boolean, index, integer, jsonb, pgTable, real, serial, text, timestamp } from 'drizzle-orm/pg-core';
 
 // Users table (synced with Neon Auth)
 export const users = pgTable('users', {
@@ -11,122 +11,116 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Agency configurations table
-export const agencyConfigs = pgTable('agency_configs', {
+// Organization settings table - One per user
+export const organizationSettings = pgTable('organization_settings', {
   id: serial('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  slug: text('slug').notNull().unique(),
-  name: text('name').notNull(),
-  industry: text('industry').notNull(),
-  description: text('description').notNull(),
-  onboardingGoal: text('onboarding_goal').notNull(),
-  tone: text('tone').notNull(),
-  targetAudience: text('target_audience').notNull(),
-  maxQuestions: integer('max_questions').notNull().default(8),
-  primaryColor: text('primary_color').notNull().default('#4f46e5'),
-  backgroundColor: text('background_color').notNull().default('#ffffff'),
-  textColor: text('text_color').notNull().default('#111827'),
+  userId: text('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  organizationName: text('organization_name').notNull(),
+  industry: text('industry'),
+  description: text('description'),
+  targetAudience: text('target_audience'),
+  onboardingGoal: text('onboarding_goal'),
+  tone: text('tone').default('Professional & Friendly'),
+  maxQuestions: integer('max_questions').default(10),
+  customInstructions: text('custom_instructions'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
-  userIdIdx: uniqueIndex('agency_configs_user_id_idx').on(table.userId),
-  slugIdx: uniqueIndex('agency_configs_slug_idx').on(table.slug),
+  userIdIdx: index('organization_settings_user_id_idx').on(table.userId),
 }));
 
-// Submissions table (stores client onboarding responses)
-export const submissions = pgTable('submissions', {
+// ============================================
+// CLIENT-CENTRIC SCHEMA
+// ============================================
+
+// Clients table - Central entity for all client data
+export const clients = pgTable('clients', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  clientName: text('client_name'),
-  summary: text('summary').notNull(),
+  name: text('name').notNull(), // From Google Meet captions
+  normalizedName: text('normalized_name').notNull(), // Lowercase, trimmed for matching
+  email: text('email'),
+  company: text('company'),
+  role: text('role'),
+  phone: text('phone'),
+  linkedinUrl: text('linkedin_url'),
+  notes: text('notes'),
+  tags: jsonb('tags').$type<string[]>().default([]),
+  metadata: jsonb('metadata').$type<Record<string, any>>().default({}),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  lastContactedAt: timestamp('last_contacted_at'),
 }, (table) => ({
-  userIdIdx: index('submissions_user_id_idx').on(table.userId),
-  createdAtIdx: index('submissions_created_at_idx').on(table.createdAt),
+  userIdIdx: index('clients_user_id_idx').on(table.userId),
+  normalizedNameIdx: index('clients_normalized_name_idx').on(table.normalizedName),
+  createdAtIdx: index('clients_created_at_idx').on(table.createdAt),
 }));
 
-// Answers table (stores individual question-answer pairs)
-export const answers = pgTable('answers', {
-  id: serial('id').primaryKey(),
-  submissionId: text('submission_id').notNull().references(() => submissions.id, { onDelete: 'cascade' }),
-  questionId: text('question_id').notNull(),
-  questionText: text('question_text').notNull(),
-  value: jsonb('value').notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
-  submissionIdIdx: index('answers_submission_id_idx').on(table.submissionId),
-}));
-
-// Relations
-export const usersRelations = relations(users, ({ many, one }) => ({
-  submissions: many(submissions),
-  agencyConfig: one(agencyConfigs, {
-    fields: [users.id],
-    references: [agencyConfigs.userId],
-  }),
-}));
-
-export const agencyConfigsRelations = relations(agencyConfigs, ({ one }) => ({
-  user: one(users, {
-    fields: [agencyConfigs.userId],
-    references: [users.id],
-  }),
-}));
-
-export const submissionsRelations = relations(submissions, ({ one, many }) => ({
-  user: one(users, {
-    fields: [submissions.userId],
-    references: [users.id],
-  }),
-  answers: many(answers),
-}));
-
-export const answersRelations = relations(answers, ({ one }) => ({
-  submission: one(submissions, {
-    fields: [answers.submissionId],
-    references: [submissions.id],
-  }),
-}));
-
-// Call sessions table (for live call transcription)
+// Call sessions table - Linked to clients
 export const callSessions = pgTable('call_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  agencyConfigId: integer('agency_config_id').references(() => agencyConfigs.id, { onDelete: 'set null' }),
-  clientName: text('client_name'),
-  clientEmail: text('client_email'),
+  clientId: text('client_id').references(() => clients.id, { onDelete: 'set null' }), // Link to client
+  clientName: text('client_name'), // Store raw name from captions
   meetingUrl: text('meeting_url'),
   status: text('status').notNull().default('active'), // 'active', 'completed', 'paused'
   startedAt: timestamp('started_at').defaultNow().notNull(),
   endedAt: timestamp('ended_at'),
   duration: integer('duration'), // seconds
   summary: text('summary'), // AI-generated post-call summary
+  keyTakeaways: jsonb('key_takeaways').$type<string[]>(),
+  actionItems: jsonb('action_items').$type<string[]>(),
+  sentiment: text('sentiment'), // 'positive', 'neutral', 'negative'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
   userIdIdx: index('call_sessions_user_id_idx').on(table.userId),
+  clientIdIdx: index('call_sessions_client_id_idx').on(table.clientId),
   statusIdx: index('call_sessions_status_idx').on(table.status),
   startedAtIdx: index('call_sessions_started_at_idx').on(table.startedAt),
 }));
 
-// Transcript segments table
+// Transcript segments table - Stores conversation data for RAG
 export const transcriptSegments = pgTable('transcript_segments', {
   id: serial('id').primaryKey(),
   callSessionId: text('call_session_id').notNull().references(() => callSessions.id, { onDelete: 'cascade' }),
+  clientId: text('client_id').references(() => clients.id, { onDelete: 'set null' }), // Denormalized for faster queries
   speaker: text('speaker').notNull(), // 'agent', 'client', 'unknown'
   text: text('text').notNull(),
   timestamp: timestamp('timestamp').notNull(),
-  confidence: real('confidence'), // Whisper confidence score
+  confidence: real('confidence'),
+  // Vector embedding for semantic search (optional, can add later)
+  // embedding: vector('embedding', { dimensions: 1536 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
   callSessionIdIdx: index('transcript_segments_call_session_id_idx').on(table.callSessionId),
+  clientIdIdx: index('transcript_segments_client_id_idx').on(table.clientId),
   timestampIdx: index('transcript_segments_timestamp_idx').on(table.timestamp),
+  speakerIdx: index('transcript_segments_speaker_idx').on(table.speaker),
 }));
 
-// Checklist items table (templates per agency)
+// Client insights table - Extracted structured information about clients
+export const clientInsights = pgTable('client_insights', {
+  id: serial('id').primaryKey(),
+  clientId: text('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  category: text('category').notNull(), // 'business_info', 'goals', 'budget', 'pain_points', 'tech_stack'
+  key: text('key').notNull(), // e.g., 'monthly_revenue', 'target_audience', 'current_mrr'
+  value: text('value').notNull(),
+  confidence: real('confidence').notNull().default(1.0),
+  sourceSessionId: text('source_session_id').references(() => callSessions.id),
+  sourceTranscriptId: integer('source_transcript_id').references(() => transcriptSegments.id),
+  extractedAt: timestamp('extracted_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  clientIdIdx: index('client_insights_client_id_idx').on(table.clientId),
+  categoryIdx: index('client_insights_category_idx').on(table.category),
+  keyIdx: index('client_insights_key_idx').on(table.key),
+}));
+
+// Checklist items table (templates per user)
 export const checklistItems = pgTable('checklist_items', {
   id: serial('id').primaryKey(),
-  agencyConfigId: integer('agency_config_id').notNull().references(() => agencyConfigs.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   label: text('label').notNull(),
   description: text('description'),
   category: text('category'), // 'business_basics', 'goals', 'budget', 'technical'
@@ -134,20 +128,22 @@ export const checklistItems = pgTable('checklist_items', {
   required: boolean('required').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
-  agencyConfigIdIdx: index('checklist_items_agency_config_id_idx').on(table.agencyConfigId),
+  userIdIdx: index('checklist_items_user_id_idx').on(table.userId),
 }));
 
 // Checklist completions table (per call session)
 export const checklistCompletions = pgTable('checklist_completions', {
   id: serial('id').primaryKey(),
   callSessionId: text('call_session_id').notNull().references(() => callSessions.id, { onDelete: 'cascade' }),
+  clientId: text('client_id').references(() => clients.id, { onDelete: 'set null' }),
   checklistItemId: integer('checklist_item_id').notNull().references(() => checklistItems.id, { onDelete: 'cascade' }),
   completedAt: timestamp('completed_at').notNull(),
-  extractedInfo: text('extracted_info'), // What the client said
+  extractedInfo: text('extracted_info'),
   transcriptSegmentId: integer('transcript_segment_id').references(() => transcriptSegments.id),
   manuallyMarked: boolean('manually_marked').default(false).notNull(),
 }, (table) => ({
   callSessionIdIdx: index('checklist_completions_call_session_id_idx').on(table.callSessionId),
+  clientIdIdx: index('checklist_completions_client_id_idx').on(table.clientId),
 }));
 
 // Question prompts table (AI suggestions during call)
@@ -163,15 +159,59 @@ export const questionPrompts = pgTable('question_prompts', {
   callSessionIdIdx: index('question_prompts_call_session_id_idx').on(table.callSessionId),
 }));
 
-// Relations for new tables
+// Chat messages table - For RAG-powered client chat
+export const chatMessages = pgTable('chat_messages', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  clientId: text('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'user' or 'assistant'
+  content: text('content').notNull(),
+  context: jsonb('context').$type<{ sessionIds?: string[], transcriptIds?: number[] }>(), // Which transcripts were used
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  clientIdIdx: index('chat_messages_client_id_idx').on(table.clientId),
+  createdAtIdx: index('chat_messages_created_at_idx').on(table.createdAt),
+}));
+
+// ============================================
+// RELATIONS
+// ============================================
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  organizationSettings: one(organizationSettings),
+  clients: many(clients),
+  callSessions: many(callSessions),
+  checklistItems: many(checklistItems),
+  chatMessages: many(chatMessages),
+}));
+
+export const organizationSettingsRelations = relations(organizationSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [organizationSettings.userId],
+    references: [users.id],
+  }),
+}));
+
+export const clientsRelations = relations(clients, ({ one, many }) => ({
+  user: one(users, {
+    fields: [clients.userId],
+    references: [users.id],
+  }),
+  callSessions: many(callSessions),
+  transcriptSegments: many(transcriptSegments),
+  insights: many(clientInsights),
+  checklistCompletions: many(checklistCompletions),
+  chatMessages: many(chatMessages),
+}));
+
 export const callSessionsRelations = relations(callSessions, ({ one, many }) => ({
   user: one(users, {
     fields: [callSessions.userId],
     references: [users.id],
   }),
-  agencyConfig: one(agencyConfigs, {
-    fields: [callSessions.agencyConfigId],
-    references: [agencyConfigs.id],
+  client: one(clients, {
+    fields: [callSessions.clientId],
+    references: [clients.id],
   }),
   transcriptSegments: many(transcriptSegments),
   checklistCompletions: many(checklistCompletions),
@@ -183,12 +223,31 @@ export const transcriptSegmentsRelations = relations(transcriptSegments, ({ one 
     fields: [transcriptSegments.callSessionId],
     references: [callSessions.id],
   }),
+  client: one(clients, {
+    fields: [transcriptSegments.clientId],
+    references: [clients.id],
+  }),
+}));
+
+export const clientInsightsRelations = relations(clientInsights, ({ one }) => ({
+  client: one(clients, {
+    fields: [clientInsights.clientId],
+    references: [clients.id],
+  }),
+  sourceSession: one(callSessions, {
+    fields: [clientInsights.sourceSessionId],
+    references: [callSessions.id],
+  }),
+  sourceTranscript: one(transcriptSegments, {
+    fields: [clientInsights.sourceTranscriptId],
+    references: [transcriptSegments.id],
+  }),
 }));
 
 export const checklistItemsRelations = relations(checklistItems, ({ one, many }) => ({
-  agencyConfig: one(agencyConfigs, {
-    fields: [checklistItems.agencyConfigId],
-    references: [agencyConfigs.id],
+  user: one(users, {
+    fields: [checklistItems.userId],
+    references: [users.id],
   }),
   completions: many(checklistCompletions),
 }));
@@ -197,6 +256,10 @@ export const checklistCompletionsRelations = relations(checklistCompletions, ({ 
   callSession: one(callSessions, {
     fields: [checklistCompletions.callSessionId],
     references: [callSessions.id],
+  }),
+  client: one(clients, {
+    fields: [checklistCompletions.clientId],
+    references: [clients.id],
   }),
   checklistItem: one(checklistItems, {
     fields: [checklistCompletions.checklistItemId],
@@ -212,5 +275,16 @@ export const questionPromptsRelations = relations(questionPrompts, ({ one }) => 
   callSession: one(callSessions, {
     fields: [questionPrompts.callSessionId],
     references: [callSessions.id],
+  }),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  user: one(users, {
+    fields: [chatMessages.userId],
+    references: [users.id],
+  }),
+  client: one(clients, {
+    fields: [chatMessages.clientId],
+    references: [clients.id],
   }),
 }));

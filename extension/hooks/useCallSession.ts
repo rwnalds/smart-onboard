@@ -9,6 +9,7 @@ export function useCallSession(meetingUrl: string) {
   const [currentPrompt, setCurrentPrompt] = useState<QuestionPrompt | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [isCaptureEnabled, setIsCaptureEnabled] = useState(false)
+  const [clientName, setClientName] = useState<string | null>(null) // Track client name from captions
   
   // Track timing and state for smart question generation
   const lastQuestionTimeRef = useRef<number>(0)
@@ -135,6 +136,13 @@ export function useCallSession(meetingUrl: string) {
             }
 
             console.log('[Session] New speaker:', { speaker, actualName: caption.speaker });
+            
+            // Track client name (first non-agent speaker)
+            if (speaker === 'client' && !clientName) {
+              setClientName(caption.speaker);
+              console.log('[Session] Client identified:', caption.speaker);
+            }
+            
             return updated;
           }
         });
@@ -515,6 +523,7 @@ export function useCallSession(meetingUrl: string) {
         body: JSON.stringify({
           userId,
           meetingUrl,
+          clientName: clientName || undefined, // Send client name if known
           status: 'active'
         })
       })
