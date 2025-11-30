@@ -1,3 +1,10 @@
+/**
+ * DEPRECATED: This component is part of the old agency onboarding system.
+ * The app has migrated to a client-centric structure. See /app/clients instead.
+ *
+ * This file is kept for reference only and should not be used in new code.
+ */
+
 import {
   BarChart3,
   Check,

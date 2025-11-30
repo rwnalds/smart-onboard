@@ -1,3 +1,10 @@
+/**
+ * DEPRECATED: This component is part of the old agency onboarding system.
+ * The app has migrated to a client-centric structure with real-time call transcription.
+ *
+ * This file is kept for reference only and should not be used in new code.
+ */
+
 import { ArrowRight, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";

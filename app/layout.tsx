@@ -2,6 +2,7 @@ import { StackProvider, StackTheme } from "@stackframe/stack";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { stackClientApp } from "../stack/client";
+import { SyncUserToExtension } from "./sync-user-to-extension";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,7 +31,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <StackProvider app={stackClientApp}>
-          <StackTheme>{children}</StackTheme>
+          <StackTheme>
+            <SyncUserToExtension />
+            {children}
+          </StackTheme>
         </StackProvider>
       </body>
     </html>
